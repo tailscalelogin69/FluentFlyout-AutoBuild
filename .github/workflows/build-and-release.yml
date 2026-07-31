@@ -17,7 +17,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Keep the fork up-to-date with official repo
       - name: Sync with upstream
         run: |
           git config user.name "github-actions[bot]"
@@ -44,7 +43,7 @@ jobs:
         run: |
           $tag = "${{ steps.official.outputs.full_tag }}"
           try {
-            $existing = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" }
+            $null = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" }
             echo "exists=true" >> $env:GITHUB_OUTPUT
             Write-Host "Release $tag already exists — skipping build."
           } catch {
@@ -62,24 +61,77 @@ jobs:
         if: steps.check.outputs.exists != 'true'
         run: dotnet restore FluentFlyout.sln
 
-      - name: Publish Full Version (x64)
+      - name: Publish Full Version (x64) - folder mode
         if: steps.check.outputs.exists != 'true'
         run: |
           dotnet publish FluentFlyoutWPF/FluentFlyout.csproj `
             -c "GitHub Release" `
             -r win-x64 `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:PublishSingleFile=false `
             -p:DebugType=None `
             -p:DebugSymbols=false `
             -p:NoWarn="CS0162;CS8600;CS8601;CS8602;CS8604;CS8629" `
             -o publish
 
-      - name: Zip
+      - name: Install Inno Setup
+        if: steps.check.outputs.exists != 'true'
+        run: choco install innosetup -y --no-progress
+
+      - name: Create Inno Setup script
         if: steps.check.outputs.exists != 'true'
         shell: pwsh
-        run: Compress-Archive -Path publish\* -DestinationPath "FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip"
+        run: |
+          $version = "${{ steps.official.outputs.tag }}".TrimStart('v')
+          $iss = @"
+          #define MyAppName "FluentFlyout"
+          #define MyAppVersion "$version"
+          #define MyAppPublisher "Unofficial Auto Build"
+          #define MyAppURL "https://github.com/tailscalelogin69/FluentFlyout-AutoBuild"
+          #define MyAppExeName "FluentFlyout.exe"
+
+          [Setup]
+          AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          AppPublisher={#MyAppPublisher}
+          AppPublisherURL={#MyAppURL}
+          AppSupportURL={#MyAppURL}
+          DefaultDirName={autopf}\{#MyAppName}
+          DefaultGroupName={#MyAppName}
+          DisableProgramGroupPage=yes
+          OutputDir=installer
+          OutputBaseFilename=FluentFlyout-{#MyAppVersion}-Full-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=lowest
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          UninstallDisplayIcon={app}\{#MyAppExeName}
+
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+          [Files]
+          Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+          "@
+          $iss | Out-File -FilePath "setup.iss" -Encoding utf8
+
+      - name: Compile Installer
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" setup.iss
 
       - name: Create Release
         if: steps.check.outputs.exists != 'true'
@@ -89,15 +141,18 @@ jobs:
           name: ${{ steps.official.outputs.name }}
           body: |
             **Unofficial automatic full build** of FluentFlyout `${{ steps.official.outputs.tag }}`
-            
+
             - Configuration: **GitHub Release** (all features unlocked)
             - Architecture: x64
-            - Self-contained
-            
-            Download the zip → extract → run `FluentFlyout.exe`
-            
+            - Self-contained + proper installer
+
+            ### How to install
+            1. Download `FluentFlyout-*-Full-Setup.exe`
+            2. Run the installer
+            3. Launch FluentFlyout from Start Menu or Desktop
+
             This is an unofficial automated build. Official project: https://github.com/unchihugo/FluentFlyout
-          files: FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip
+          files: installer/FluentFlyout-*-Full-Setup.exe
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

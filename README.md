@@ -7,16 +7,15 @@ This is an **unofficial** automated build repository of [FluentFlyout](https://g
 ### What this repo does
 - Automatically pulls the latest source code from the official repository
 - Compiles the **full unrestricted** version (`GitHub Release` configuration)
-- Publishes ready-to-download builds as GitHub Releases
+- Creates a proper Windows installer (Setup.exe)
 - Only creates a new release when the official version changes
 
 ### Download
 
-**[Download Latest Full Build](https://github.com/tailscalelogin69/FluentFlyout-AutoBuild/releases/latest)**
+**[Download Latest Installer](https://github.com/tailscalelogin69/FluentFlyout-AutoBuild/releases/latest)**
 
-Or go to the [Releases](../../releases) page.
-
-Extract the zip and run `FluentFlyout.exe`.
+Run the `FluentFlyout-*-Full-Setup.exe` installer.  
+It will install the full version to Program Files and create Start Menu / Desktop shortcuts.
 
 ### Important notes
 - This is **not** an official repository.
