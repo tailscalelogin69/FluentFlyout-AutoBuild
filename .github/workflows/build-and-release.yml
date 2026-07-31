@@ -36,16 +36,34 @@ jobs:
           $tag = $response.tag_name
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
           echo "name=FluentFlyout $tag (Full Auto Build)" >> $env:GITHUB_OUTPUT
+          echo "full_tag=${tag}-full" >> $env:GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.official.outputs.full_tag }}"
+          try {
+            $existing = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" }
+            echo "exists=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Release $tag already exists — skipping build."
+          } catch {
+            echo "exists=false" >> $env:GITHUB_OUTPUT
+            Write-Host "No existing release for $tag — will build."
+          }
 
       - name: Setup .NET 10
+        if: steps.check.outputs.exists != 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
       - name: Restore
+        if: steps.check.outputs.exists != 'true'
         run: dotnet restore FluentFlyout.sln
 
       - name: Publish Full Version (x64)
+        if: steps.check.outputs.exists != 'true'
         run: |
           dotnet publish FluentFlyoutWPF/FluentFlyout.csproj `
             -c "GitHub Release" `
@@ -55,16 +73,19 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=None `
             -p:DebugSymbols=false `
+            -p:NoWarn="CS0162;CS8600;CS8601;CS8602;CS8604;CS8629" `
             -o publish
 
       - name: Zip
+        if: steps.check.outputs.exists != 'true'
         shell: pwsh
         run: Compress-Archive -Path publish\* -DestinationPath "FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip"
 
       - name: Create Release
+        if: steps.check.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.official.outputs.tag }}-full
+          tag_name: ${{ steps.official.outputs.full_tag }}
           name: ${{ steps.official.outputs.name }}
           body: |
             **Unofficial automatic full build** of FluentFlyout `${{ steps.official.outputs.tag }}`
