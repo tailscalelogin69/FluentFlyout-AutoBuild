@@ -61,6 +61,20 @@ jobs:
         if: steps.check.outputs.exists != 'true'
         run: dotnet restore FluentFlyout.sln
 
+      - name: Set Application Icon
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $csproj = "FluentFlyoutWPF/FluentFlyout.csproj"
+          $content = Get-Content $csproj -Raw
+          if ($content -notmatch "ApplicationIcon") {
+            $content = $content -replace "(<PropertyGroup>)\s*", "`$1`r`n    <ApplicationIcon>Resources\FluentFlyout2.ico</ApplicationIcon>`r`n"
+            Set-Content -Path $csproj -Value $content -NoNewline
+            Write-Host "ApplicationIcon added."
+          } else {
+            Write-Host "ApplicationIcon already present."
+          }
+
       - name: Publish
         if: steps.check.outputs.exists != 'true'
         run: dotnet publish FluentFlyoutWPF/FluentFlyout.csproj -c "GitHub Release" -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o publish
