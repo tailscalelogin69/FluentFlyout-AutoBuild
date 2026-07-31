@@ -71,7 +71,7 @@ jobs:
             -p:PublishSingleFile=false `
             -p:DebugType=None `
             -p:DebugSymbols=false `
-            -p:NoWarn="CS0162;CS8600;CS8601;CS8602;CS8604;CS8629" `
+            -p:NoWarn=CS0162;CS8600;CS8601;CS8602;CS8604;CS8629 `
             -o publish
 
       - name: Install Inno Setup
