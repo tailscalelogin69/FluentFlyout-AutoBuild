@@ -63,17 +63,8 @@ jobs:
 
       - name: Publish Full Version (x64) - folder mode
         if: steps.check.outputs.exists != 'true'
-        shell: pwsh
         run: |
-          dotnet publish FluentFlyoutWPF/FluentFlyout.csproj `
-            -c "GitHub Release" `
-            -r win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=false `
-            -p:DebugType=None `
-            -p:DebugSymbols=false `
-            "-p:NoWarn=CS0162;CS8600;CS8601;CS8602;CS8604;CS8629" `
-            -o publish
+          dotnet publish FluentFlyoutWPF/FluentFlyout.csproj -c "GitHub Release" -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o publish
 
       - name: Install Inno Setup
         if: steps.check.outputs.exists != 'true'
