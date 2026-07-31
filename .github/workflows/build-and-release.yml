@@ -1,0 +1,82 @@
+name: Build Full Version & Release (Smart)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout this fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Keep the fork up-to-date with official repo
+      - name: Sync with upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/unchihugo/FluentFlyout.git || true
+          git fetch upstream
+          git checkout master || git checkout main
+          git merge upstream/master --no-edit || git merge upstream/main --no-edit
+          git push origin HEAD || true
+
+      - name: Get latest official release tag
+        id: official
+        shell: pwsh
+        run: |
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/unchihugo/FluentFlyout/releases/latest"
+          $tag = $response.tag_name
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "name=FluentFlyout $tag (Full Auto Build)" >> $env:GITHUB_OUTPUT
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore FluentFlyout.sln
+
+      - name: Publish Full Version (x64)
+        run: |
+          dotnet publish FluentFlyoutWPF/FluentFlyout.csproj `
+            -c "GitHub Release" `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path publish\* -DestinationPath "FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.official.outputs.tag }}-full
+          name: ${{ steps.official.outputs.name }}
+          body: |
+            **Unofficial automatic full build** of FluentFlyout `${{ steps.official.outputs.tag }}`
+            
+            - Configuration: **GitHub Release** (all features unlocked)
+            - Architecture: x64
+            - Self-contained
+            
+            Download the zip → extract → run `FluentFlyout.exe`
+            
+            This is an unofficial automated build. Official project: https://github.com/unchihugo/FluentFlyout
+          files: FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
