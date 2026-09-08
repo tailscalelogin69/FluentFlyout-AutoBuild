@@ -1,0 +1,154 @@
+name: Build Full Version & Release
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync with upstream (conflict-free)
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Save our custom files before reset
+          Copy-Item ".github\workflows\build-and-release.yml" "$env:RUNNER_TEMP\build-and-release.yml" -Force
+          if (Test-Path "README.md") {
+            Copy-Item "README.md" "$env:RUNNER_TEMP\README.md" -Force
+          }
+
+          git remote add upstream https://github.com/unchihugo/FluentFlyout.git 2>$null
+          if ($LASTEXITCODE -ne 0) { git remote set-url upstream https://github.com/unchihugo/FluentFlyout.git }
+
+          git fetch upstream
+
+          $upstreamBranch = "upstream/master"
+          git rev-parse --verify upstream/master 2>$null
+          if ($LASTEXITCODE -ne 0) { $upstreamBranch = "upstream/main" }
+
+          # Hard reset to official source
+          git checkout -B master $upstreamBranch
+
+          # CRITICAL: remove ALL upstream workflow files.
+          # GITHUB_TOKEN cannot create/update foreign workflow YAMLs without workflows: write.
+          if (Test-Path ".github\workflows") {
+            Get-ChildItem ".github\workflows" -File | Remove-Item -Force
+          }
+          New-Item -ItemType Directory -Force -Path ".github\workflows" | Out-Null
+
+          # Restore only our auto-build workflow + README
+          Copy-Item "$env:RUNNER_TEMP\build-and-release.yml" ".github\workflows\build-and-release.yml" -Force
+          if (Test-Path "$env:RUNNER_TEMP\README.md") {
+            Copy-Item "$env:RUNNER_TEMP\README.md" "README.md" -Force
+          }
+
+          git add -A
+          $status = git status --porcelain
+          if ($status) {
+            git commit -m "Sync with upstream + keep auto-build workflow only"
+            git push origin master --force
+          } else {
+            Write-Host "Already in sync."
+          }
+
+      - name: Get latest official tag
+        id: official
+        shell: pwsh
+        run: |
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/unchihugo/FluentFlyout/releases/latest"
+          $tag = $response.tag_name
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+          echo "name=FluentFlyout $tag (Full Auto Build)" >> $env:GITHUB_OUTPUT
+          echo "full_tag=${tag}-full" >> $env:GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.official.outputs.full_tag }}"
+          try {
+            $null = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}" }
+            echo "exists=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Release $tag already exists - skipping."
+          } catch {
+            echo "exists=false" >> $env:GITHUB_OUTPUT
+            Write-Host "No existing release - will build."
+          }
+
+      - name: Setup .NET 10
+        if: steps.check.outputs.exists != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        if: steps.check.outputs.exists != 'true'
+        run: dotnet restore FluentFlyout.sln
+
+      - name: Set Application Icon on WPF project only
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $csproj = "FluentFlyoutWPF\FluentFlyout.csproj"
+          $iconRel = "Resources\FluentFlyout2.ico"
+          if (-not (Test-Path "FluentFlyoutWPF\$iconRel")) {
+            Write-Host "Icon not found - skipping."
+            exit 0
+          }
+          $content = Get-Content $csproj -Raw
+          if ($content -notmatch "ApplicationIcon") {
+            $content = $content -replace "(<PropertyGroup>)", "`$1`r`n    <ApplicationIcon>$iconRel</ApplicationIcon>"
+            Set-Content -Path $csproj -Value $content -NoNewline
+            Write-Host "ApplicationIcon injected."
+          } else {
+            Write-Host "ApplicationIcon already present."
+          }
+
+      - name: Publish
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          dotnet publish FluentFlyoutWPF/FluentFlyout.csproj -c "GitHub Release" -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o publish
+
+      - name: Zip
+        if: steps.check.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish\* -DestinationPath "FluentFlyout-${{ steps.official.outputs.tag }}-Full-x64.zip" -Force
+
+      - name: Create Release
+        if: steps.check.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.official.outputs.full_tag }}
+          name: ${{ steps.official.outputs.name }}
+          body: |
+            **Unofficial automatic full build** of FluentFlyout `${{ steps.official.outputs.tag }}`
+
+            - Configuration: **GitHub Release** (all features unlocked)
+            - Architecture: x64
+            - Self-contained
+
+            ### How to use
+            1. Download the zip
+            2. Extract it anywhere
+            3. Run `FluentFlyout.exe`
+
+            This is an unofficial automated build.
+            Official project: https://github.com/unchihugo/FluentFlyout
+          files: FluentFlyout-*-Full-x64.zip
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
